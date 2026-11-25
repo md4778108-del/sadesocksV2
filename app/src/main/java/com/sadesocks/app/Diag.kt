@@ -22,15 +22,25 @@ object Diag {
         }
     }
 
+    private fun tail(f: File, max: Int): String {
+        if (!f.exists()) return "(empty)\n"
+        return java.io.RandomAccessFile(f, "r").use { raf ->
+            val len = raf.length()
+            val n = if (len > max) max else len.toInt()
+            raf.seek(len - n)
+            val buf = ByteArray(n)
+            raf.readFully(buf)
+            String(buf, Charsets.UTF_8)
+        }
+    }
+
     fun read(c: Context): String {
         return try {
-            val a = File(c.filesDir, "app.log")
-            val h = File(c.filesDir, "hev.log")
             val sb = StringBuilder()
             sb.append("--- app log ---\n")
-            sb.append(if (a.exists()) a.readText().takeLast(2500) else "(empty)\n")
-            sb.append("\n--- engine log ---\n")
-            sb.append(if (h.exists()) h.readText().takeLast(2500) else "(empty)\n")
+            sb.append(tail(File(c.filesDir, "app.log"), 2500))
+            sb.append("\n--- engine log (latest) ---\n")
+            sb.append(tail(File(c.filesDir, "hev.log"), 6000))
             sb.toString()
         } catch (e: Throwable) {
             "(cannot read log: ${e.message})"

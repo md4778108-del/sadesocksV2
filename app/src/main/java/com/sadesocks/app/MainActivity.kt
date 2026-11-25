@@ -168,7 +168,7 @@ class MainActivity : Activity() {
         tvStatus.text = when (st) {
             SocksVpnService.State.DISCONNECTED -> "Disconnected"
             SocksVpnService.State.CONNECTING -> if (msg.isEmpty()) "Connecting..." else msg
-            SocksVpnService.State.CONNECTED -> "Connected"
+            SocksVpnService.State.CONNECTED -> if (msg.isEmpty()) "Connected" else msg
             SocksVpnService.State.ERROR -> "Error: $msg"
         }
         btnConnect.text = if (editable) "Connect" else "Disconnect"

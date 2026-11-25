@@ -1,4 +1,4 @@
-# Sade Socks (v2.0)
+# Sade Socks (v3.0)
 
 Android 14 ready SOCKS5 VPN client (VpnService + hev-socks5-tunnel).
 All IPv4 + IPv6 traffic and DNS go through your SOCKS5 server.

@@ -85,6 +85,31 @@ class SocksVpnService : VpnService() {
             Socks5Probe.check(ip, cfg.port, cfg.user, cfg.pass)
             Diag.log(this, "probe ok")
 
+            // Find out what this proxy can really do, then pick the working DNS mode.
+            message = "Testing proxy..."
+            var remoteDns = true
+            val domainRep = Socks5Probe.testDomain(ip, cfg.port, cfg.user, cfg.pass)
+            Diag.log(this, "test domain connect: ${Socks5Probe.describe(domainRep)}")
+            if (domainRep != 0) {
+                val ipRep = Socks5Probe.testIp(ip, cfg.port, cfg.user, cfg.pass)
+                Diag.log(this, "test ip connect: ${Socks5Probe.describe(ipRep)}")
+                if (ipRep != 0) {
+                    throw IllegalStateException(
+                        "Proxy login works but it cannot open connections " +
+                            "(domain: ${Socks5Probe.describe(domainRep)}, ip: ${Socks5Probe.describe(ipRep)})"
+                    )
+                }
+                val udpRep = Socks5Probe.testUdp(ip, cfg.port, cfg.user, cfg.pass)
+                Diag.log(this, "test udp: ${Socks5Probe.describe(udpRep)}")
+                if (udpRep != 0) {
+                    throw IllegalStateException(
+                        "This proxy cannot resolve domain names and has no UDP, so websites cannot work through it"
+                    )
+                }
+                remoteDns = false
+            }
+            Diag.log(this, if (remoteDns) "mode: remote DNS (domain names via proxy)" else "mode: plain DNS over UDP")
+
             synchronized(lock) {
                 if (id != session) return
                 message = "Starting tunnel..."
@@ -96,8 +121,13 @@ class SocksVpnService : VpnService() {
                     .addAddress("fc00::1", 128)
                     .addRoute("0.0.0.0", 0)      // all IPv4 through the tunnel
                     .addRoute("::", 0)           // all IPv6 through the tunnel (no IPv6 leak)
-                    .addDnsServer("198.18.0.2")  // answered inside the tunnel (no DNS leak)
                     .addDisallowedApplication(packageName) // our own socket to the server stays outside
+                if (remoteDns) {
+                    builder.addDnsServer("198.18.0.2")   // answered inside the tunnel (no DNS leak)
+                } else {
+                    builder.addDnsServer("1.1.1.1")
+                    builder.addDnsServer("8.8.8.8")
+                }
 
                 Diag.log(this, "establishing vpn")
                 val pfd = builder.establish()
@@ -106,7 +136,7 @@ class SocksVpnService : VpnService() {
 
                 File(filesDir, "hev.log").delete()
                 val cfgFile = File(filesDir, "tunnel.yml")
-                cfgFile.writeText(buildYaml(cfg, ip))
+                cfgFile.writeText(buildYaml(cfg, ip, remoteDns))
 
                 Diag.log(this, "starting engine")
                 val ok = TProxyService.TProxyStartService(cfgFile.absolutePath, pfd.fd)
@@ -114,7 +144,7 @@ class SocksVpnService : VpnService() {
                 engineRunning = true
 
                 state = State.CONNECTED
-                message = "Connected"
+                message = if (remoteDns) "Connected" else "Connected (plain DNS mode)"
                 Diag.log(this, "connected")
             }
         } catch (t: Throwable) {
@@ -134,7 +164,7 @@ class SocksVpnService : VpnService() {
 
     private fun q(s: String): String = "'" + s.replace("'", "''") + "'"
 
-    private fun buildYaml(cfg: Config, ip: InetAddress): String {
+    private fun buildYaml(cfg: Config, ip: InetAddress, remoteDns: Boolean): String {
         val addr = (ip.hostAddress ?: "").substringBefore('%')
         val logPath = File(filesDir, "hev.log").absolutePath
         val sb = StringBuilder()
@@ -150,16 +180,17 @@ class SocksVpnService : VpnService() {
             sb.append("  username: ${q(cfg.user)}\n")
             sb.append("  password: ${q(cfg.pass)}\n")
         }
-        sb.append("mapdns:\n")
-        sb.append("  address: 198.18.0.2\n")
-        sb.append("  port: 53\n")
-        sb.append("  network: 100.64.0.0\n")
-        sb.append("  netmask: 240.0.0.0\n")
-        sb.append("  cache-size: 10000\n")
+        if (remoteDns) {
+            sb.append("mapdns:\n")
+            sb.append("  address: 198.18.0.2\n")
+            sb.append("  port: 53\n")
+            sb.append("  network: 100.64.0.0\n")
+            sb.append("  netmask: 255.192.0.0\n")
+            sb.append("  cache-size: 10000\n")
+        }
         sb.append("misc:\n")
-        sb.append("  task-stack-size: 81920\n")
         sb.append("  log-file: ${q(logPath)}\n")
-        sb.append("  log-level: info\n")
+        sb.append("  log-level: warn\n")
         return sb.toString()
     }
 
