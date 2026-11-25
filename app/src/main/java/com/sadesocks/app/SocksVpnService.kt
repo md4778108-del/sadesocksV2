@@ -29,12 +29,14 @@ class SocksVpnService : VpnService() {
 
         @Volatile var state: State = State.DISCONNECTED
         @Volatile var message: String = ""
+        @Volatile var mockStatus: String = ""
     }
 
     private val lock = Any()
     private var tun: ParcelFileDescriptor? = null
     private var engineRunning = false
     private var session = 0
+    private var spoofer: LocationSpoofer? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
@@ -147,9 +149,53 @@ class SocksVpnService : VpnService() {
                 message = if (remoteDns) "Connected" else "Connected (plain DNS mode)"
                 Diag.log(this, "connected")
             }
+            applyMockLocation(id, cfg, ip)
         } catch (t: Throwable) {
             Diag.log(this, "error: ${t.javaClass.simpleName}: ${t.message}")
             fail(id, friendly(t))
+        }
+    }
+
+    /** After the tunnel is up: find the exit IP's location (or use manual lat/lon) and mock it. */
+    private fun applyMockLocation(id: Int, cfg: Config, server: InetAddress) {
+        try {
+            val sp = Config.prefs(this)
+            if (!sp.getBoolean("mock_enabled", false)) {
+                mockStatus = ""
+                return
+            }
+            val lat: Double
+            val lon: Double
+            val label: String
+            if (sp.getString("mock_mode", "auto") == "manual") {
+                lat = sp.getString("mock_lat", "")?.toDoubleOrNull()
+                    ?: throw IllegalStateException("Manual latitude is invalid")
+                lon = sp.getString("mock_lon", "")?.toDoubleOrNull()
+                    ?: throw IllegalStateException("Manual longitude is invalid")
+                label = "manual"
+            } else {
+                mockStatus = "Detecting exit IP location..."
+                val g = GeoIp.lookupExit(this, cfg, server)
+                lat = g.lat
+                lon = g.lon
+                label = "${g.place} (exit IP ${g.ip})"
+            }
+            synchronized(lock) {
+                if (id != session) return
+                spoofer?.stop()
+                spoofer = null
+                val s = LocationSpoofer(this)
+                val err = s.start(lat, lon)
+                if (err != null) {
+                    mockStatus = "Mock location failed: $err"
+                    return
+                }
+                spoofer = s
+                mockStatus = "Mock location ON: $label  " + String.format(java.util.Locale.US, "%.5f, %.5f", lat, lon)
+            }
+        } catch (t: Throwable) {
+            Diag.log(this, "mock location error: ${t.javaClass.simpleName}: ${t.message}")
+            mockStatus = "Mock location failed: ${t.message ?: t.javaClass.simpleName}"
         }
     }
 
@@ -230,6 +276,13 @@ class SocksVpnService : VpnService() {
 
     private fun releaseResources() {
         synchronized(lock) {
+            try {
+                spoofer?.stop()
+            } catch (e: Throwable) {
+                // ignore
+            }
+            spoofer = null
+            mockStatus = ""
             if (engineRunning) {
                 try {
                     TProxyService.TProxyStopService()

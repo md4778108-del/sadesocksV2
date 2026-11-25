@@ -65,6 +65,80 @@
             android:layout_marginTop="16dp"
             android:text="Connect" />
 
+        <Switch
+            android:id="@+id/swMock"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="Mock location (match proxy IP)" />
+
+        <LinearLayout
+            android:id="@+id/llMock"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <RadioGroup
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <RadioButton
+                    android:id="@+id/rbAuto"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:checked="true"
+                    android:text="Auto (from IP)" />
+
+                <RadioButton
+                    android:id="@+id/rbManual"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="16dp"
+                    android:text="Manual" />
+            </RadioGroup>
+
+            <LinearLayout
+                android:id="@+id/llManual"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <EditText
+                    android:id="@+id/etLat"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="Latitude (e.g. 40.7128)"
+                    android:inputType="numberDecimal|numberSigned"
+                    android:singleLine="true" />
+
+                <EditText
+                    android:id="@+id/etLon"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="Longitude (e.g. -74.0060)"
+                    android:inputType="numberDecimal|numberSigned"
+                    android:singleLine="true" />
+            </LinearLayout>
+
+            <Button
+                android:id="@+id/btnDevOptions"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="Developer options: select Sade Socks as mock app" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/tvLoc"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:textSize="13sp"
+            android:visibility="gone" />
+
         <Button
             android:id="@+id/btnVpnSettings"
             android:layout_width="match_parent"

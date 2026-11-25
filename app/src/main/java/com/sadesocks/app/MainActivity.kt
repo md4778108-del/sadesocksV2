@@ -9,7 +9,10 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.view.View
 import android.widget.Button
+import android.widget.RadioButton
+import android.widget.Switch
 import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
@@ -26,6 +29,14 @@ class MainActivity : Activity() {
     private lateinit var btnConnect: Button
     private lateinit var tvStatus: TextView
     private lateinit var tvLog: TextView
+    private lateinit var swMock: Switch
+    private lateinit var llMock: View
+    private lateinit var rbAuto: RadioButton
+    private lateinit var rbManual: RadioButton
+    private lateinit var llManual: View
+    private lateinit var etLat: EditText
+    private lateinit var etLon: EditText
+    private lateinit var tvLoc: TextView
 
     private val poll = object : Runnable {
         override fun run() {
@@ -52,6 +63,34 @@ class MainActivity : Activity() {
         if (savedPort > 0) etPort.setText(savedPort.toString())
         etUser.setText(sp.getString("user", ""))
         etPass.setText(sp.getString("pass", ""))
+
+        swMock = findViewById(R.id.swMock)
+        llMock = findViewById(R.id.llMock)
+        rbAuto = findViewById(R.id.rbAuto)
+        rbManual = findViewById(R.id.rbManual)
+        llManual = findViewById(R.id.llManual)
+        etLat = findViewById(R.id.etLat)
+        etLon = findViewById(R.id.etLon)
+        tvLoc = findViewById(R.id.tvLoc)
+
+        swMock.isChecked = sp.getBoolean("mock_enabled", false)
+        val manual = sp.getString("mock_mode", "auto") == "manual"
+        rbManual.isChecked = manual
+        rbAuto.isChecked = !manual
+        etLat.setText(sp.getString("mock_lat", ""))
+        etLon.setText(sp.getString("mock_lon", ""))
+        swMock.setOnCheckedChangeListener { _, _ -> updateMockVisibility() }
+        rbAuto.setOnCheckedChangeListener { _, _ -> updateMockVisibility() }
+        rbManual.setOnCheckedChangeListener { _, _ -> updateMockVisibility() }
+        updateMockVisibility()
+
+        findViewById<Button>(R.id.btnDevOptions).setOnClickListener {
+            try {
+                startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS))
+            } catch (e: Exception) {
+                Toast.makeText(this, "Settings > Developer options > Select mock location app", Toast.LENGTH_LONG).show()
+            }
+        }
 
         btnConnect.setOnClickListener { onConnectClicked() }
 
@@ -88,6 +127,11 @@ class MainActivity : Activity() {
     override fun onPause() {
         super.onPause()
         handler.removeCallbacks(poll)
+    }
+
+    private fun updateMockVisibility() {
+        llMock.visibility = if (swMock.isChecked) View.VISIBLE else View.GONE
+        llManual.visibility = if (rbManual.isChecked) View.VISIBLE else View.GONE
     }
 
     /** Accepts a pasted line like  ip:port:user:pass  in the first box. */
@@ -127,6 +171,23 @@ class MainActivity : Activity() {
         }
         Config.save(this, Config(host, port, etUser.text.toString().trim(), etPass.text.toString().trim()))
 
+        val lat = etLat.text.toString().trim()
+        val lon = etLon.text.toString().trim()
+        if (swMock.isChecked && rbManual.isChecked) {
+            val la = lat.toDoubleOrNull()
+            val lo = lon.toDoubleOrNull()
+            if (la == null || la !in -90.0..90.0 || lo == null || lo !in -180.0..180.0) {
+                Toast.makeText(this, "Enter valid latitude (-90..90) and longitude (-180..180)", Toast.LENGTH_LONG).show()
+                return
+            }
+        }
+        sp().edit()
+            .putBoolean("mock_enabled", swMock.isChecked)
+            .putString("mock_mode", if (rbManual.isChecked) "manual" else "auto")
+            .putString("mock_lat", lat)
+            .putString("mock_lon", lon)
+            .apply()
+
         val intent = VpnService.prepare(this)
         if (intent != null) {
             startActivityForResult(intent, reqVpn)
@@ -146,6 +207,8 @@ class MainActivity : Activity() {
             }
         }
     }
+
+    private fun sp() = Config.prefs(this)
 
     private fun launchVpn() {
         try {
@@ -176,5 +239,14 @@ class MainActivity : Activity() {
         etPort.isEnabled = editable
         etUser.isEnabled = editable
         etPass.isEnabled = editable
+        swMock.isEnabled = editable
+        rbAuto.isEnabled = editable
+        rbManual.isEnabled = editable
+        etLat.isEnabled = editable
+        etLon.isEnabled = editable
+
+        val ms = SocksVpnService.mockStatus
+        tvLoc.visibility = if (ms.isEmpty()) View.GONE else View.VISIBLE
+        tvLoc.text = ms
     }
 }
