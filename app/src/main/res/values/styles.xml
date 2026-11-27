@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="AppTheme" parent="@android:style/Theme.DeviceDefault.Light.NoActionBar">
+        <item name="android:statusBarColor">@color/sade_red_dark</item>
+        <item name="android:navigationBarColor">@color/sade_green_dark</item>
+        <item name="android:windowBackground">@color/sade_green_light</item>
+        <item name="android:textColorPrimary">#1B1B1B</item>
+        <item name="android:colorAccent">@color/sade_green</item>
+    </style>
+</resources>

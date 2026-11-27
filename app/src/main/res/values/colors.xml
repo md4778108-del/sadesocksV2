@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="sade_red">#D32F2F</color>
+    <color name="sade_red_dark">#B71C1C</color>
+    <color name="sade_green">#2E7D32</color>
+    <color name="sade_green_dark">#1B5E20</color>
+    <color name="sade_green_light">#E8F5E9</color>
+    <color name="sade_white">#FFFFFF</color>
+</resources>

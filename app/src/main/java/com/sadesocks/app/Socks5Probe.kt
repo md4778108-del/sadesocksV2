@@ -122,59 +122,6 @@ object Socks5Probe {
         request(ip, port, user, pass, 3, 1, byteArrayOf(0, 0, 0, 0), 0)
     }
 
-    /**
-     * Opens a TCP connection to [dest]:[destPort] THROUGH the SOCKS5 proxy and returns the live socket.
-     * Used to ask a geo-IP service "where am I?" so we see the proxy's exit IP, not the real one.
-     */
-    fun connectVia(
-        ip: InetAddress, port: Int, user: String, pass: String,
-        dest: String, destPort: Int, asDomain: Boolean
-    ): Socket {
-        val ses = open(ip, port, user, pass)
-        try {
-            val req = ByteArrayOutputStream()
-            req.write(5)
-            req.write(1)
-            req.write(0)
-            if (asDomain) {
-                val d = dest.toByteArray()
-                req.write(3)
-                req.write(d.size)
-                req.write(d)
-            } else {
-                val raw = InetAddress.getByName(dest).address
-                req.write(if (raw.size == 4) 1 else 4)
-                req.write(raw)
-            }
-            req.write(destPort shr 8)
-            req.write(destPort and 0xff)
-            ses.out.write(req.toByteArray())
-            ses.out.flush()
-
-            val ver = ses.inp.readUnsignedByte()
-            val rep = ses.inp.readUnsignedByte()
-            ses.inp.readUnsignedByte()
-            val atyp = ses.inp.readUnsignedByte()
-            if (ver != 5) throw IOException("Bad SOCKS5 reply")
-            if (rep != 0) throw IOException("Proxy refused: ${describe(rep)}")
-            val skip = when (atyp) {
-                1 -> 4
-                4 -> 16
-                3 -> ses.inp.readUnsignedByte()
-                else -> throw IOException("Bad SOCKS5 reply")
-            }
-            ses.inp.readFully(ByteArray(skip + 2))
-            return ses.socket
-        } catch (t: Throwable) {
-            try {
-                ses.socket.close()
-            } catch (x: Throwable) {
-                // ignore
-            }
-            throw t
-        }
-    }
-
     fun describe(code: Int): String = when (code) {
         0 -> "ok"
         1 -> "general failure"

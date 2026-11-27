@@ -11,8 +11,8 @@ android {
         applicationId = "com.sadesocks.app"
         minSdk = 24
         targetSdk = 34
-        versionCode = 7
-        versionName = "3.1"
+        versionCode = 8
+        versionName = "3.3"
     }
 
     buildTypes {

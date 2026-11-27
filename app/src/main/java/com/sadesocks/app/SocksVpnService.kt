@@ -25,18 +25,21 @@ class SocksVpnService : VpnService() {
         const val ACTION_START = "com.sadesocks.app.START"
         const val ACTION_STOP = "com.sadesocks.app.STOP"
         private const val MTU = 1500
+        // Ordinary-looking private addresses. The old 198.18.0.1 / fc00::1 pair is the
+        // well-known default of tun2socks engines and is easy to recognise in WebRTC or
+        // interface dumps. Only an IPv4 address is assigned; IPv6 is captured and dropped.
+        private const val TUN_V4 = "192.168.173.1"
+        private const val DNS_V4 = "192.168.173.2"
         private const val CHANNEL_ID = "sade_socks_vpn"
 
         @Volatile var state: State = State.DISCONNECTED
         @Volatile var message: String = ""
-        @Volatile var mockStatus: String = ""
     }
 
     private val lock = Any()
     private var tun: ParcelFileDescriptor? = null
     private var engineRunning = false
     private var session = 0
-    private var spoofer: LocationSpoofer? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
@@ -119,13 +122,18 @@ class SocksVpnService : VpnService() {
                 val builder = Builder()
                     .setSession("Sade Socks")
                     .setMtu(MTU)
-                    .addAddress("198.18.0.1", 32)
-                    .addAddress("fc00::1", 128)
+                    .addAddress(TUN_V4, 32)
                     .addRoute("0.0.0.0", 0)      // all IPv4 through the tunnel
-                    .addRoute("::", 0)           // all IPv6 through the tunnel (no IPv6 leak)
+                    // IPv6: no address on the tunnel, but the default route is captured so IPv6
+                    // packets enter the tunnel and are dropped there (no IPv6 leak, and the
+                    // phone looks like it is on an IPv4-only network).
+                    .addRoute("::", 0)
                     .addDisallowedApplication(packageName) // our own socket to the server stays outside
+                if (Build.VERSION.SDK_INT >= 29) {
+                    builder.setMetered(false)   // behave like a normal unmetered link
+                }
                 if (remoteDns) {
-                    builder.addDnsServer("198.18.0.2")   // answered inside the tunnel (no DNS leak)
+                    builder.addDnsServer(DNS_V4)   // answered inside the tunnel (no DNS leak)
                 } else {
                     builder.addDnsServer("1.1.1.1")
                     builder.addDnsServer("8.8.8.8")
@@ -134,12 +142,18 @@ class SocksVpnService : VpnService() {
                 Diag.log(this, "establishing vpn")
                 val pfd = builder.establish()
                     ?: throw IllegalStateException("VPN permission was not granted")
+                val oldTun = tun
                 tun = pfd
+                try { oldTun?.close() } catch (e: Throwable) { /* ignore */ }
 
                 File(filesDir, "hev.log").delete()
                 val cfgFile = File(filesDir, "tunnel.yml")
                 cfgFile.writeText(buildYaml(cfg, ip, remoteDns))
 
+                if (engineRunning) {
+                    try { TProxyService.TProxyStopService() } catch (e: Throwable) { /* ignore */ }
+                    engineRunning = false
+                }
                 Diag.log(this, "starting engine")
                 val ok = TProxyService.TProxyStartService(cfgFile.absolutePath, pfd.fd)
                 if (!ok) throw IllegalStateException("Tunnel engine failed to start")
@@ -148,54 +162,42 @@ class SocksVpnService : VpnService() {
                 state = State.CONNECTED
                 message = if (remoteDns) "Connected" else "Connected (plain DNS mode)"
                 Diag.log(this, "connected")
+                startWatchdog(id)
             }
-            applyMockLocation(id, cfg, ip)
         } catch (t: Throwable) {
             Diag.log(this, "error: ${t.javaClass.simpleName}: ${t.message}")
             fail(id, friendly(t))
         }
     }
 
-    /** After the tunnel is up: find the exit IP's location (or use manual lat/lon) and mock it. */
-    private fun applyMockLocation(id: Int, cfg: Config, server: InetAddress) {
-        try {
-            val sp = Config.prefs(this)
-            if (!sp.getBoolean("mock_enabled", false)) {
-                mockStatus = ""
-                return
-            }
-            val lat: Double
-            val lon: Double
-            val label: String
-            if (sp.getString("mock_mode", "auto") == "manual") {
-                lat = sp.getString("mock_lat", "")?.toDoubleOrNull()
-                    ?: throw IllegalStateException("Manual latitude is invalid")
-                lon = sp.getString("mock_lon", "")?.toDoubleOrNull()
-                    ?: throw IllegalStateException("Manual longitude is invalid")
-                label = "manual"
-            } else {
-                mockStatus = "Detecting exit IP location..."
-                val g = GeoIp.lookupExit(this, cfg, server)
-                lat = g.lat
-                lon = g.lon
-                label = "${g.place} (exit IP ${g.ip})"
-            }
-            synchronized(lock) {
-                if (id != session) return
-                spoofer?.stop()
-                spoofer = null
-                val s = LocationSpoofer(this)
-                val err = s.start(lat, lon)
-                if (err != null) {
-                    mockStatus = "Mock location failed: $err"
-                    return
+    /**
+     * If the engine dies while connected we do NOT close the tunnel: with nobody reading it,
+     * all traffic is black-holed instead of falling back to the real network (fail-closed).
+     * The status only changes so the user can see what happened.
+     */
+    private fun startWatchdog(id: Int) {
+        thread(name = "sade-watchdog", isDaemon = true) {
+            try {
+                while (true) {
+                    Thread.sleep(2000)
+                    synchronized(lock) {
+                        if (id != session || state != State.CONNECTED) return@thread
+                    }
+                    if (!TProxyService.TProxyIsRunning()) {
+                        synchronized(lock) {
+                            if (id != session || state != State.CONNECTED) return@thread
+                            engineRunning = false
+                            state = State.ERROR
+                            message = "Engine stopped. Traffic is blocked (no leak). Tap Connect to retry."
+                        }
+                        Diag.log(this, "engine stopped unexpectedly; tunnel kept open (fail-closed)")
+                        return@thread
+                    }
                 }
-                spoofer = s
-                mockStatus = "Mock location ON: $label  " + String.format(java.util.Locale.US, "%.5f, %.5f", lat, lon)
+            } catch (t: Throwable) {
+                // watchdog is best effort (e.g. native method missing); never crash the app
+                Diag.log(this, "watchdog off: ${t.javaClass.simpleName}")
             }
-        } catch (t: Throwable) {
-            Diag.log(this, "mock location error: ${t.javaClass.simpleName}: ${t.message}")
-            mockStatus = "Mock location failed: ${t.message ?: t.javaClass.simpleName}"
         }
     }
 
@@ -216,8 +218,7 @@ class SocksVpnService : VpnService() {
         val sb = StringBuilder()
         sb.append("tunnel:\n")
         sb.append("  mtu: $MTU\n")
-        sb.append("  ipv4: 198.18.0.1\n")
-        sb.append("  ipv6: 'fc00::1'\n")
+        sb.append("  ipv4: $TUN_V4\n")
         sb.append("socks5:\n")
         sb.append("  port: ${cfg.port}\n")
         sb.append("  address: ${q(addr)}\n")
@@ -228,7 +229,7 @@ class SocksVpnService : VpnService() {
         }
         if (remoteDns) {
             sb.append("mapdns:\n")
-            sb.append("  address: 198.18.0.2\n")
+            sb.append("  address: $DNS_V4\n")
             sb.append("  port: 53\n")
             sb.append("  network: 100.64.0.0\n")
             sb.append("  netmask: 255.192.0.0\n")
@@ -276,13 +277,6 @@ class SocksVpnService : VpnService() {
 
     private fun releaseResources() {
         synchronized(lock) {
-            try {
-                spoofer?.stop()
-            } catch (e: Throwable) {
-                // ignore
-            }
-            spoofer = null
-            mockStatus = ""
             if (engineRunning) {
                 try {
                     TProxyService.TProxyStopService()
