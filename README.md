@@ -1,4 +1,4 @@
-# Sade Socks (v3.3)
+# Sade Socks (v3.4)
 
 Android 14 ready SOCKS5 VPN client (VpnService + hev-socks5-tunnel).
 All IPv4 + IPv6 traffic and DNS go through your SOCKS5 server.
@@ -12,3 +12,5 @@ and a watchdog keeps the tunnel open (traffic blocked) if the engine dies.
 For a real kill switch also enable Always-on VPN + "Block connections without VPN".
 
 v3.3 UI: red header with Sade logo, green body/buttons, new app icon.
+
+v3.4: build fix (stale GeoIp.kt overwritten with an empty object).
